@@ -30,8 +30,6 @@ builtins.bboard = simbase.bboard
 builtins.config = simbase.config
 builtins.directNotify = directNotify
 
-# we don't use ToontownLoader because it just adds progress bar
-# functionality to Loader
 from direct.showbase import Loader
 
 simbase.loader = Loader.Loader(simbase)

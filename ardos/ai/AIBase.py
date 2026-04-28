@@ -111,11 +111,6 @@ class AIBase:
 
         AIBase.notify.info("__dev__ == %s" % __dev__)
 
-        # This is temporary:
-        builtins.wantTestObject = ConfigVariableBool(
-            "want-test-object", False
-        ).getValue()
-
         self.wantStats = ConfigVariableBool("want-pstats", False).getValue()
         Task.TaskManager.pStatsTasks = ConfigVariableBool(
             "pstats-tasks", False
@@ -143,53 +138,6 @@ class AIBase:
             # very little memory, and doesn't require a bogus texture
             # to be loaded repeatedly.
             loadPrcFileData("aibase", "textures-header-only #t")
-
-        # If there's a Toontown-specific AIBase, that's where the following
-        # config flags should be.
-        # I tried putting this logic in ToontownAIRepository, but wantPets is
-        # needed during the import of ToontownAIRepository.py
-        self.wantPets = ConfigVariableBool("want-pets", True).getValue()
-        if self.wantPets:
-            if game.name == "toontown":
-                from toontown.pets import PetConstants
-
-                self.petMoodTimescale = ConfigVariableDouble(
-                    "pet-mood-timescale", 1.0
-                ).getValue()
-                self.petMoodDriftPeriod = ConfigVariableDouble(
-                    "pet-mood-drift-period", PetConstants.MoodDriftPeriod
-                ).getValue()
-                self.petThinkPeriod = ConfigVariableDouble(
-                    "pet-think-period", PetConstants.ThinkPeriod
-                ).getValue()
-                self.petMovePeriod = ConfigVariableDouble(
-                    "pet-move-period", PetConstants.MovePeriod
-                ).getValue()
-                self.petPosBroadcastPeriod = ConfigVariableDouble(
-                    "pet-pos-broadcast-period", PetConstants.PosBroadcastPeriod
-                ).getValue()
-
-        self.wantBingo = ConfigVariableBool("want-fish-bingo", True).getValue()
-        self.wantKarts = ConfigVariableBool("wantKarts", True).getValue()
-
-        self.newDBRequestGen = ConfigVariableBool(
-            "new-database-request-generate", True
-        ).getValue()
-
-        self.waitShardDelete = ConfigVariableBool("wait-shard-delete", True).getValue()
-        self.blinkTrolley = ConfigVariableBool("blink-trolley", False).getValue()
-        self.fakeDistrictPopulations = ConfigVariableBool(
-            "fake-district-populations", False
-        ).getValue()
-
-        self.wantSwitchboard = ConfigVariableBool("want-switchboard", False).getValue()
-        self.wantSwitchboardHacks = ConfigVariableBool(
-            "want-switchboard-hacks", False
-        ).getValue()
-        self.GEMdemoWhisperRecipientDoid = ConfigVariableBool(
-            "gem-demo-whisper-recipient-doid", False
-        ).getValue()
-        self.sqlAvailable = ConfigVariableBool("sql-available", True).getValue()
 
         self.createStats()
 

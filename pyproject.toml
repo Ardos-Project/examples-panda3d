@@ -1,0 +1,2 @@
+[tool.black]
+include = 'ardos\/.*\.pyi?$|open-world\/.*\.pyi?$'
