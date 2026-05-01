@@ -1,0 +1,23 @@
+services:
+  openworld-md:
+    image: rabbitmq:3-management
+    container_name: "OpenWorld_MD"
+    ports:
+      - "15672:15672"
+      - "5672:5672"
+
+  openworld-ardos:
+    image: ghcr.io/ksmit799/ardos:v1.3.1
+    container_name: "OpenWorld_Ardos"
+    depends_on:
+      - openworld-md
+    ports:
+      - "7199:7199"
+      - "25565:25565"
+    volumes:
+      - ./config/ardos.config.yml:/config.yml
+      - ../config/direct.dc:/app/dclass/direct.dc
+      - ./config/openworld.dc:/app/dclass/openworld.dc
+    deploy:
+      restart_policy:
+        condition: on-failure # It might take a second for the MD to boot up.

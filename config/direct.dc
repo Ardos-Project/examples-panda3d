@@ -1,0 +1,129 @@
+// This dc file implements the classes underneath panda3d/direct.
+// These are all fundamental classes that are intended to be reusable
+// across projects. You should copy this file into your own project,
+// and create a separate dc file that implements your project specific
+// logic. Note that you don't *need* to use all of these, and you could
+// get away with only using `DistributedObject` and defining your own
+// behavior in subclasses. See the game specific dc files in this repo.
+
+from direct.distributed import DistributedObject/AI/UD
+from direct.distributed import DistributedObjectGlobal/AI/UD
+from direct.distributed import TimeManager/AI
+from direct.distributed import DistributedNode/AI/UD
+from direct.distributed import DistributedSmoothNode/AI
+from direct.distributed import DistributedCartesianGrid/AI
+from direct.distributed import DistributedCamera/AI/OV
+
+// Some useful typedefs.
+// These are just aliases, and exist only to improve readability.
+// (although they're not used here.)
+typedef uint8 bool;
+typedef uint32 DoId;
+typedef DoId [] DoIdList;
+
+struct BarrierData {
+  uint16 context;
+  string name;
+  uint32 avIds[];
+};
+
+// The most fundamental class
+dclass DistributedObject {
+  // These are used to support DistributedObjectAI.beginBarrier() and
+  // the matching DistributedObject.doneBarrier().  If you don't call
+  // these functions, you don't care about these distributed methods.
+  // (Actually, you probably don't care anyway.)
+  setBarrierData(BarrierData data[]) broadcast ram;
+  setBarrierReady(uint16 context) airecv clsend;
+};
+
+dclass DistributedObjectGlobal: DistributedObject {}
+
+dclass TimeManager: DistributedObject {
+  // Sent by clients when requesting to synchronize
+  // local time with server time.
+  requestServerTime(uint8 context) clsend airecv;
+  serverTime(uint8 context, int32 timestamp);
+};
+
+dclass DistributedNode: DistributedObject {
+  setX(int16 / 10) broadcast ram ownsend airecv;
+  setY(int16 / 10) broadcast ram ownsend airecv;
+  setZ(int16 / 10) broadcast ram ownsend airecv;
+  setH(int16 % 360 / 10) broadcast ram ownsend airecv;
+  setP(int16 % 360 / 10) broadcast ram ownsend airecv;
+  setR(int16 % 360 / 10) broadcast ram ownsend airecv;
+
+  setPos: setX, setY, setZ;
+  setHpr: setH, setP, setR;
+  setPosHpr: setX, setY, setZ, setH, setP, setR;
+  setXY: setX, setY;
+  setXZ: setX, setZ;
+  setXYH: setX, setY, setH;
+  setXYZH: setX, setY, setZ, setH;
+};
+
+dclass DistributedSmoothNode: DistributedNode {
+  // Component set pos and hpr functions.
+
+  setComponentL(uint64) broadcast ram ownsend airecv;
+  setComponentX(int16 / 10) broadcast ram ownsend airecv;
+  setComponentY(int16 / 10) broadcast ram ownsend airecv;
+  setComponentZ(int16 / 10) broadcast ram ownsend airecv;
+  setComponentH(int16 % 360 / 10) broadcast ram ownsend airecv;
+  setComponentP(int16 % 360 / 10) broadcast ram ownsend airecv;
+  setComponentR(int16 % 360 / 10) broadcast ram ownsend airecv;
+  setComponentT(int16 timestamp) broadcast ram ownsend airecv;
+
+  // Composite set pos and hpr functions.  These map to combinations
+  // of one or more of the above components.  They all include
+  // setComponentT(), which must be called last.
+  setSmStop: setComponentT;
+  setSmH: setComponentH, setComponentT;
+  setSmZ: setComponentZ, setComponentT;
+  setSmXY: setComponentX, setComponentY, setComponentT;
+  setSmXZ: setComponentX, setComponentZ, setComponentT;
+  setSmPos: setComponentX, setComponentY, setComponentZ, setComponentT;
+  setSmHpr: setComponentH, setComponentP, setComponentR, setComponentT;
+  setSmXYH: setComponentX, setComponentY, setComponentH, setComponentT;
+  setSmXYZH: setComponentX, setComponentY, setComponentZ, setComponentH, setComponentT;
+  setSmPosHpr: setComponentX, setComponentY, setComponentZ, setComponentH, setComponentP, setComponentR, setComponentT;
+  // special update if L (being location, such as zoneId) changes, send everything, intended to
+  // keep position and 'location' in sync
+  setSmPosHprL: setComponentL, setComponentX, setComponentY, setComponentZ, setComponentH, setComponentP, setComponentR, setComponentT;
+
+  // I don't need any parameters, but for some reason leaving the
+  // parameter list empty on this one causes a server crash.
+  clearSmoothing(int8 bogus) broadcast ownsend;
+
+  suggestResync(uint32 avId, int16 timestampA, int16 timestampB,
+                int32 serverTimeSec, uint16 serverTimeUSec,
+                uint16 / 100 uncertainty) ownrecv clsend;
+  returnResync(uint32 avId, int16 timestampB,
+               int32 serverTimeSec, uint16 serverTimeUSec,
+               uint16 / 100 uncertainty) ownrecv clsend;
+};
+
+dclass DistributedCartesianGrid: DistributedNode {
+  // Make sure setCellWidth gets called before setParentingRules
+  setCellWidth(uint32 width) required broadcast ram;
+
+  // base:size:resolution
+  //.. 0:100:1 == 3x3  interest grids.. with 100x100 size.. numbering starting at 0 ie 0.0 = 0
+  setParentingRules(string type="Cartesian", string Rule="0:100:1") broadcast ram;
+};
+
+struct Fixture {
+  int32 x / 10;
+  int32 y / 10;
+  int32 z / 10;
+  int16 h / 10;
+  int16 p / 10;
+  int16 r / 10;
+  string state = 'Standby';
+};
+
+dclass DistributedCamera: DistributedNode {
+  setCamParent(uint32 doId = 0) required broadcast ram ownsend airecv;
+  setFixtures(Fixture[] fixtures) required broadcast ram ownsend airecv;
+};

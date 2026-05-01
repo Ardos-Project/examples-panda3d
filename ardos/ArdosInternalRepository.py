@@ -78,6 +78,22 @@ class ArdosInternalRepository(ConnectionRepository):
         self.__contextCounter = (self.__contextCounter + 1) & 0xFFFFFFFF
         return self.__contextCounter
 
+    def getAvatarIdFromSender(self):
+        """
+        Returns the current message senders avatarId.
+        N.B. This only works for client sender channels encoded with a hi accountId and lo avatarId.
+        :return:
+        """
+        return self.getMsgSender() & 0xFFFFFFFF
+
+    def getAccountIdFromSender(self):
+        """
+        Returns the current message senders accountId.
+        N.B. This only works for client sender channels encoded with a hi accountId and lo avatarId.
+        :return:
+        """
+        return (self.getMsgSender() >> 32) & 0xFFFFFFFF
+
     def allocateChannel(self):
         """
         Allocate an unused channel out of this AIR's configured channel space.
@@ -167,6 +183,9 @@ class ArdosInternalRepository(ConnectionRepository):
         self.send(dg)
 
     def handleDatagram(self, di):
+        # TODO: Remove once added to Panda MsgTypes.
+        CLIENTAGENT_DONE_INTEREST_RESP = 1204
+
         msgType = self.getMsgType()
 
         if msgType in (
@@ -204,8 +223,8 @@ class ArdosInternalRepository(ConnectionRepository):
             )
         elif msgType == CLIENTAGENT_GET_NETWORK_ADDRESS_RESP:
             self.handleGetNetworkAddressResp(di)
-        # elif msgType == CLIENTAGENT_DONE_INTEREST_RESP:
-        #    self.handleClientAgentInterestDoneResp(di)
+        elif msgType == CLIENTAGENT_DONE_INTEREST_RESP:
+            self.handleClientInterestDoneResp(di)
         elif msgType >= 20000:
             # These messages belong to the NetMessenger:
             self.netMessenger.handle(msgType, di)
@@ -269,6 +288,16 @@ class ArdosInternalRepository(ConnectionRepository):
         do.delete()
         do.sendDeleteEvent()
 
+    def getActivated(self, doId, callback):
+        ctx = self.getContext()
+        self.__callbacks[ctx] = callback
+
+        dg = PyDatagram()
+        dg.addServerHeader(doId, self.ourChannel, DBSS_OBJECT_GET_ACTIVATED)
+        dg.addUint32(ctx)
+        dg.addUint32(doId)
+        self.send(dg)
+
     def handleGetActivatedResp(self, di):
         ctx = di.getUint32()
         doId = di.getUint32()
@@ -284,16 +313,6 @@ class ArdosInternalRepository(ConnectionRepository):
             self.__callbacks[ctx](doId, activated)
         finally:
             del self.__callbacks[ctx]
-
-    def getActivated(self, doId, callback):
-        ctx = self.getContext()
-        self.__callbacks[ctx] = callback
-
-        dg = PyDatagram()
-        dg.addServerHeader(doId, self.ourChannel, DBSS_OBJECT_GET_ACTIVATED)
-        dg.addUint32(ctx)
-        dg.addUint32(doId)
-        self.send(dg)
 
     def getLocation(self, doId, callback):
         """
@@ -652,8 +671,22 @@ class ArdosInternalRepository(ConnectionRepository):
             self.send(dg)
 
     def sendSetLocation(self, do, parentId, zoneId):
+        """
+        NOTE: the public API for this is in DistributedObjectAI.b_setLocation()
+        :param do:
+        :param parentId:
+        :param zoneId:
+        :return:
+        """
         dg = PyDatagram()
         dg.addServerHeader(do.doId, self.ourChannel, STATESERVER_OBJECT_SET_LOCATION)
+        dg.addUint32(parentId)
+        dg.addUint32(zoneId)
+        self.send(dg)
+
+    def sendSetLocationDoId(self, doId, parentId, zoneId):
+        dg = PyDatagram()
+        dg.addServerHeader(doId, self.ourChannel, STATESERVER_OBJECT_SET_LOCATION)
         dg.addUint32(parentId)
         dg.addUint32(zoneId)
         self.send(dg)
@@ -850,10 +883,10 @@ class ArdosInternalRepository(ConnectionRepository):
 
     def clientAddInterest(
         self,
-        client_channel: int,
-        interest_id: int,
-        parent_id: int,
-        zone_id: int,
+        clientChannel: int,
+        interestId: int,
+        parentId: int,
+        zoneId: int,
         callback: object = None,
     ) -> None:
         """
@@ -863,74 +896,77 @@ class ArdosInternalRepository(ConnectionRepository):
         """
 
         dg = PyDatagram()
-        dg.addServerHeader(client_channel, self.ourChannel, CLIENTAGENT_ADD_INTEREST)
-        dg.addUint16(interest_id)
-        dg.addUint32(parent_id)
-        dg.addUint32(zone_id)
+        dg.addServerHeader(clientChannel, self.ourChannel, CLIENTAGENT_ADD_INTEREST)
+        # Set the high bit to indicate that the interest is being governed by
+        # the AI and not the client
+        dg.addUint16((1 << 15) + interestId)
+        dg.addUint32(parentId)
+        dg.addUint32(zoneId)
         self.send(dg)
 
-        if callback != None:
-            ctx = (client_channel, interest_id)
+        if callback is not None:
+            ctx = (clientChannel, (1 << 15) + interestId)
             self.__callbacks[ctx] = callback
 
-    def client_add_interest_multiple(
+    def clientAddInterestMultiple(
         self,
-        client_channel: int,
-        interest_id: int,
-        parent_id: int,
-        zone_list: int,
+        clientChannel: int,
+        interestId: int,
+        parentId: int,
+        zoneList: list[int],
         callback: object = None,
     ) -> None:
         """ """
 
         dg = PyDatagram()
         dg.addServerHeader(
-            client_channel, self.ourChannel, CLIENTAGENT_ADD_INTEREST_MULTIPLE
+            clientChannel, self.ourChannel, CLIENTAGENT_ADD_INTEREST_MULTIPLE
         )
-        dg.addUint16(interest_id)
-        dg.addUint32(parent_id)
-        dg.addUint16(len(zone_list))
-        for zoneId in zone_list:
+        # Set the high bit to indicate that the interest is being governed by
+        # the AI and not the client
+        dg.addUint16((1 << 15) + interestId)
+        dg.addUint32(parentId)
+        dg.addUint16(len(zoneList))
+        for zoneId in zoneList:
             dg.addUint32(zoneId)
 
-        if callback != None:
-            ctx = (client_channel, interest_id)
+        if callback is not None:
+            ctx = (clientChannel, (1 << 15) + interestId)
             self.__callbacks[ctx] = callback
 
         self.send(dg)
 
-    def client_remove_interest(
-        self, client_channel: int, interest_id: int, callback: object = None
+    def clientRemoveInterest(
+        self, clientChannel: int, interestId: int, callback: object = None
     ) -> None:
         """ """
 
         dg = PyDatagram()
-        dg.addServerHeader(client_channel, self.ourChannel, CLIENTAGENT_REMOVE_INTEREST)
-        dg.addUint16(interest_id)
+        dg.addServerHeader(clientChannel, self.ourChannel, CLIENTAGENT_REMOVE_INTEREST)
+        dg.addUint16((1 << 15) + interestId)
         self.send(dg)
 
-        if callback != None:
-            ctx = (client_channel, interest_id)
+        if callback is not None:
+            ctx = (clientChannel, (1 << 15) + interestId)
             self.__callbacks[ctx] = callback
 
-    def handle_client_agent_interest_done_resp(self, di: PyDatagramIterator) -> None:
+    def handleClientInterestDoneResp(self, di: PyDatagramIterator) -> None:
         """
         Sent by the ClientAgent to the caller of CLIENTAGENT_ADD_INTEREST to inform them that the interest operation has completed.
         """
 
-        client_channel = di.getUint64()
-        interest_id = di.getUint16()
-        ctx = (client_channel, interest_id)
+        clientChannel = di.getUint64()
+        interestId = di.getUint16()
+        ctx = (clientChannel, interestId)
 
         if ctx not in self.__callbacks:
             self.notify.warning(
-                "Received unexpected CLIENTAGENT_DONE_INTEREST_RESP (ctx: (%s, %s))"
-                % ctx
+                f"Received unexpected CLIENTAGENT_DONE_INTEREST_RESP (ctx: {ctx})"
             )
             return
 
         try:
-            self.__callbacks[ctx](client_channel, interest_id)
+            self.__callbacks[ctx](clientChannel, interestId)
         finally:
             del self.__callbacks[ctx]
 
@@ -945,10 +981,39 @@ class ArdosInternalRepository(ConnectionRepository):
         dg.addUint64(newOwner)
         self.send(dg)
 
-    set_owner = setOwner
-
-    # Snake case helpers
+    # snake_case aliases for camelCase functions.
+    get_context = getContext
+    allocate_channel = allocateChannel
+    deallocate_channel = deallocateChannel
+    register_for_channel = registerForChannel
+    unregister_for_channel = unregisterForChannel
+    add_post_remove = addPostRemove
+    clear_post_remove = clearPostRemove
+    set_con_name = setConName
+    get_activated = getActivated
+    get_location = getLocation
+    get_object_fields = getObjectFields
+    get_object = getObject
+    get_network_address = getNetworkAddress
+    send_update = sendUpdate
+    send_update_to_channel = sendUpdateToChannel
+    send_update_to_channel_from = sendUpdateToChannelFrom
+    send_update_to_ud = sendUpdateToUD
+    send_update_to_ud_from = sendUpdateToUDFrom
+    send_update_to_ai = sendUpdateToAI
+    send_activate = sendActivate
+    send_set_location = sendSetLocation
+    send_set_location_do_id = sendSetLocationDoId
+    generate_with_required = generateWithRequired
+    generate_with_required_and_id = generateWithRequiredAndId
+    request_delete = requestDelete
     write_server_event = writeServerEvent
     set_ai = setAI
     set_client_state = setClientState
+    set_allow_client_send = setAllowClientSend
     client_add_session_object = clientAddSessionObject
+    client_remove_session_object = clientRemoveSessionObject
+    client_add_interest = clientAddInterest
+    client_add_interest_multiple = clientAddInterestMultiple
+    client_remove_interest = clientRemoveInterest
+    set_owner = setOwner

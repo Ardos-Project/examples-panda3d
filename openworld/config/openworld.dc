@@ -1,0 +1,49 @@
+from openworld.uberdog import AuthMgr/UD
+from openworld.ai import DistributedDistrict/AI
+from openworld.world import DistributedWorld/AI
+from openworld.world import DistributedTree/AI
+from openworld.distributed import DistributedPlayer/AI/UD/OV
+
+// Simple authentication class that authenticates users within the cluster.
+dclass AuthMgr: DistributedObject {
+  login(string username) clsend airecv;
+}
+
+// Each AI server that is running will generate it's own DistributedDistrict.
+// You can think of this as the "parent" object of each shard,
+// and its entire world lives underneath it.
+// Anything generated/moved underneath this that has fields marked `airecv`
+// will be handled by the AI that generated this district.
+dclass DistributedDistrict: DistributedObject {
+  setName(string name) required broadcast ram;
+  setAvailable(bool) required broadcast ram;
+  setPopulation(uint16) required broadcast ram;
+
+  // Sent by clients when requesting to join this district.
+  requestJoin() clsend airecv;
+  // We could also have something like the below to reject that request.
+  // rejectJoin(string reason);
+}
+
+// This is the root world.
+// Each AI generates its own DistributedWorld, and anything that should be visible
+// as players run along the world should be parented underneath here.
+// See world/DistributedWorldAI - if you update values in there, also update setParentingRules.
+dclass DistributedWorld: DistributedCartesianGrid {
+  // base:size:resolution
+  // 3x3 interest grids, with 20x20 size, zoneIds/grids starting at 500 (positon 0.0 = 500)
+  setParentingRules(string type="Cartesian", string Rule="500:20:1") broadcast ram;
+}
+
+// We generate trees in each grid of the world to better visualize grid interest being opened/closed as we run around.
+dclass DistributedTree: DistributedNode {
+
+}
+
+// Each player will have the below generated for themselves and will be granted ownership of it.
+// This allows them to set fields marked `ownsend`, such as position, chat, etc.
+// If these were marked `clsend`, any player could update our own position.
+// See direct.dc for `DistributedSmoothNode` which actually handles the setting of position.
+dclass DistributedPlayer: DistributedSmoothNode {
+  setName(string name) required broadcast ram;
+}

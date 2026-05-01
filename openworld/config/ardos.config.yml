@@ -1,0 +1,89 @@
+# Console output log level.
+# Options are verbose, info, warn, error or none.
+log-level: warn
+
+# DC (Distributed Class) file paths.
+# These should be kept in-sync globally.
+dc-files:
+  - /app/dclass/direct.dc
+  - /app/dclass/openworld.dc
+
+# Do we want distributed objects to live on this instance?
+want-state-server: true
+
+# Do we want players to be able to connect to this instance?
+want-client-agent: true
+
+# Do we want to handle database operations on this instance?
+want-database: false
+
+# Do we want database-backed distributed objects to live on this instance?
+want-db-state-server: false
+
+# Do we want metrics collection on this instance?
+want-metrics: false
+
+# Do we want a web interface running on this instance?
+want-web-panel: false
+
+uberdogs:
+  - id: 4100
+    class: AuthMgr
+    anonymous: true # Allows un-authenticated clients to communicate with this object.
+
+# Message Director configuration.
+message-director:
+  # Listen configuration.
+  host: 0.0.0.0
+  port: 7199
+
+  # RabbitMQ configuration.
+  rabbitmq-host: openworld-md
+  rabbitmq-port: 5672
+  rabbitmq-user: guest
+  rabbitmq-password: guest
+
+# State Server configuration.
+state-server:
+  channel: 1001
+
+# Client Agent configuration.
+client-agent:
+  # Listen configuration.
+  host: 0.0.0.0
+  port: 25565
+
+  # The logical version of the server.
+  # This, along with the computed (or manual) DC hash, is used as a first point of contact to authenticate clients.
+  version: openworld
+
+  # The name of the "avatar" class that clients can own.
+  # This is only necessary if you want to take advantage of `setParentingRules`,
+  # and/or legacy shim chatting. Otherwise, this can be omitted.
+  avatar-class: DistributedPlayer
+
+  # Interval in MS of heartbeat messages expected from clients.
+  heartbeat-interval: 30000 # 30 seconds.
+
+  # Time in MS required for clients to authenticate within.
+  auth-timeout: 45000 # 45 seconds.
+
+  # Time in MS clients can attempt to send updates to once visible objects
+  # without being disconnected for a security violation.
+  historical-objects-ttl: 5000 # 5 seconds.
+
+  # Interest configuration.
+  # N.B. An AI server modifying a players interest will always bypass the below settings.
+  interest:
+    # all - Allows clients to set their own interests.
+    # visible - Only allowed to set interest in zones of a visible parent object.
+    # disabled - Clients aren't allowed to set their own interests (default.)
+    client: disabled
+
+  # Allow clients to set the location of their owned objects.
+  relocate-allowed: false
+
+  # The range of channels this CA can allocate.
+  channels:
+    min: 1000000000
+    max: 1009999999

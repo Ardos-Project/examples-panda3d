@@ -19,12 +19,15 @@ class ArdosClientRepository(ClientRepositoryBase):
 
     notify = DirectNotifyGlobal.directNotify.newCategory("ArdosClientRepository")
 
-    # This is required by DoCollectionManager, even though it's not
-    # used by this implementation.
+    # This is required by DoCollectionManager.
+    # It's the "root" distributed object generated at the top of the network tree.
     GameGlobalsId = 0
 
     def __init__(self, *args, **kwargs):
         ClientRepositoryBase.__init__(self, *args, **kwargs)
+
+        if not self.GameGlobalsId:
+            self.notify.error(f"GameGlobalsId must be defined!")
 
     @staticmethod
     def getConnectedEvent():
@@ -52,6 +55,7 @@ class ArdosClientRepository(ClientRepositoryBase):
 
     def handleDatagram(self, di: PyDatagramIterator) -> None:
         msgType = self.getMsgType()
+        self.notify.warning(f"GOT MESSAGE: {msgType}")
         if msgType == CLIENT_HELLO_RESP:
             self.handleHelloResp()
         elif msgType == CLIENT_EJECT:
@@ -75,11 +79,11 @@ class ArdosClientRepository(ClientRepositoryBase):
         elif msgType == CLIENT_OBJECT_LOCATION:
             self.handleObjectLocation(di)
         elif msgType == CLIENT_ADD_INTEREST:
-            self.handleAddInterest(di)
+            self.handleServerAddInterest(di)
         elif msgType == CLIENT_ADD_INTEREST_MULTIPLE:
-            self.handleAddInterestMultiple(di)
+            self.handleServerAddInterestMultiple(di)
         elif msgType == CLIENT_REMOVE_INTEREST:
-            self.handleRemoveInterest(di)
+            self.handleServerRemoveInterest(di)
         else:
             self.notify.error(f"Got unknown message type {msgType}!")
 
@@ -405,9 +409,8 @@ class ArdosClientRepository(ClientRepositoryBase):
         # Stop trying to read the connection
         self.stopReaderPollTask()
 
-
-    #
+    # snake_case aliases for camelCase functions.
     send_hello = sendHello
     send_heartbeat = sendHeartbeat
     send_disconnect = sendDisconnect
-    send_setLocation = sendSetLocation
+    send_set_location = sendSetLocation
