@@ -22,6 +22,9 @@ class ArdosClientRepository(ClientRepositoryBase):
     # This is required by DoCollectionManager.
     # It's the "root" distributed object generated at the top of the network tree.
     GameGlobalsId = 0
+    # Interests opened by the server will have a (1 << 15) mask to indentify them.
+    # This needs to be stripped before being sent as an event here.
+    ServerInterestHandleMask = 0x7FFF
 
     def __init__(self, *args, **kwargs):
         ClientRepositoryBase.__init__(self, *args, **kwargs)
@@ -40,6 +43,10 @@ class ArdosClientRepository(ClientRepositoryBase):
     @staticmethod
     def getHelloRespEvent():
         return "ArdosClientRepository:HelloResp"
+
+    @staticmethod
+    def getServerInterestDoneEvent():
+        return "ArdosClientRepository:ServerInterestDone"
 
     @staticmethod
     def getServerAddInterestEvent():
@@ -78,6 +85,7 @@ class ArdosClientRepository(ClientRepositoryBase):
             self.handleInterestDone(di)
         elif msgType == CLIENT_OBJECT_LOCATION:
             self.handleObjectLocation(di)
+        # TODO: I'm tempted to not have Ardos send interest events for server interests.
         elif msgType == CLIENT_ADD_INTEREST:
             self.handleServerAddInterest(di)
         elif msgType == CLIENT_ADD_INTEREST_MULTIPLE:
@@ -272,6 +280,22 @@ class ArdosClientRepository(ClientRepositoryBase):
             self.disableDoId(doId, ownerView)
 
     def handleInterestDone(self, di: PyDatagramIterator) -> None:
+        # We need to peek at the data here and see if the 15th bit is set for the handle.
+        # If it is, this was a server added interest, and the client will have no context of what it is.
+        # Just send a message out like we do with other server interest events.
+        # N.B. The client could have a concept of "well known" server interest handles,
+        # which this would be helpful for.
+        diPeek = DatagramIterator(di.getDatagram(), di.getCurrentIndex())
+        context = diPeek.getUint32()
+        handle = diPeek.getUint16()
+        if handle & self.ServerInterestHandleMask:
+            # This is a server interest handle
+            messenger.send(
+                ArdosClientRepository.getServerInterestDoneEvent(),
+                [context, handle & self.ServerInterestHandleMask],
+            )
+            return
+
         # We just received this message from the server; decide if we
         # should handle it immediately.
         if self.deferredGenerates:
@@ -325,12 +349,12 @@ class ArdosClientRepository(ClientRepositoryBase):
         :return:
         """
         context = di.getUint32()
-        interestId = di.getUint16()
+        handle = di.getUint16()
         parentId = di.getUint32()
         zoneId = di.getUint32()
         messenger.send(
             ArdosClientRepository.getServerAddInterestEvent(),
-            [context, interestId, parentId, zoneId],
+            [context, handle & self.ServerInterestHandleMask, parentId, zoneId],
         )
 
     def handleServerAddInterestMultiple(self, di: PyDatagramIterator) -> None:
@@ -341,12 +365,12 @@ class ArdosClientRepository(ClientRepositoryBase):
         :return:
         """
         context = di.getUint32()
-        interestId = di.getUint16()
+        handle = di.getUint16()
         parentId = di.getUint32()
         zoneIds = [di.getUint32() for _ in range(di.getUint16())]
         messenger.send(
             ArdosClientRepository.getServerAddInterestMultipleEvent(),
-            [context, interestId, parentId, zoneIds],
+            [context, handle & self.ServerInterestHandleMask, parentId, zoneIds],
         )
 
     def handleServerRemoveInterest(self, di: PyDatagramIterator) -> None:
@@ -356,9 +380,10 @@ class ArdosClientRepository(ClientRepositoryBase):
         :return:
         """
         context = di.getUint32()
-        interestId = di.getUint16()
+        handle = di.getUint16()
         messenger.send(
-            ArdosClientRepository.getServerRemoveInterestEvent(), [context, interestId]
+            ArdosClientRepository.getServerRemoveInterestEvent(),
+            [context, handle & self.ServerInterestHandleMask],
         )
 
     def sendHello(self, version: str) -> None:
