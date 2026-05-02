@@ -41,6 +41,11 @@ class OpenWorldAIRepository(ArdosInternalRepository):
         self.distributedDistrict.generateWithRequiredAndId(
             self.districtId, self.getGameDoId(), OpenWorldGlobals.ZONE_ID_DISTRICTS
         )
+        # We have to explicity claim ownership of our own DistributedDistrict as it's being generated at the "root"
+        # of the network tree. Anything generated underneath the district
+        # will have it's managing AI automatically set to us, so we only need to do it here.
+        # (or if we want to explicity change an objects managing AI)
+        self.distributedDistrict.setAI(self.ourChannel)
 
         # Create the world for this district.
         self.world = DistributedWorldAI(self)

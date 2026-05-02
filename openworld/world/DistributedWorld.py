@@ -1,8 +1,10 @@
+from direct.directnotify import DirectNotifyGlobal
 from direct.distributed.DistributedCartesianGrid import DistributedCartesianGrid
 from panda3d.core import AmbientLight, DirectionalLight
 
 
 class DistributedWorld(DistributedCartesianGrid):
+    notify = DirectNotifyGlobal.directNotify.newCategory("DistributedWorld")
 
     def __init__(self, cr):
         DistributedCartesianGrid.__init__(self, cr)
@@ -13,6 +15,8 @@ class DistributedWorld(DistributedCartesianGrid):
 
     def announceGenerate(self):
         DistributedCartesianGrid.announceGenerate(self)
+
+        self.reparentTo(render)
 
         # Set up the environment
         #
@@ -30,7 +34,7 @@ class DistributedWorld(DistributedCartesianGrid):
         self.environ.reparentTo(render)
 
         # We do not have a skybox, so we will just use a sky blue background color
-        self.setBackgroundColor(0.53, 0.80, 0.92, 1)
+        base.setBackgroundColor(0.53, 0.80, 0.92, 1)
 
         # Create some lighting
         self.ambientLight = AmbientLight("ambientLight")

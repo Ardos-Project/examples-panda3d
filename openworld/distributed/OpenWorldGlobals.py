@@ -24,3 +24,4 @@ ZONE_ID_WORLD = 1
 # It lets the client know which districts (AI servers) are currently online.
 # See AuthMgrUD.
 INTEREST_HANDLE_CLIENT_DISTRICTS = 1
+INTEREST_HANDLE_CLIENT_WORLD = 2

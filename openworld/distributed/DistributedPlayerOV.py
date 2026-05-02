@@ -1,5 +1,6 @@
 import sys
 
+from direct.directnotify import DirectNotifyGlobal
 from direct.task.TaskManagerGlobal import taskMgr
 from panda3d.core import (
     CollisionTraverser,
@@ -17,6 +18,7 @@ from openworld.distributed.DistributedPlayer import DistributedPlayer
 
 
 class DistributedPlayerOV(DistributedPlayer):
+    notify = DirectNotifyGlobal.directNotify.newCategory("DistributedPlayerOV")
 
     def __init__(self, cr):
         DistributedPlayer.__init__(self, cr)
@@ -31,13 +33,16 @@ class DistributedPlayerOV(DistributedPlayer):
             "cam-right": 0,
         }
 
+        self.colliding = False
+
+    def isLocal(self):
+        return True
+
     def announceGenerate(self):
         DistributedPlayer.announceGenerate(self)
 
-        # Setup local controls, camera, collision, etc.
-        self.setupLocalPlayer()
+        self.cr.doId2do[self.doId] = self
 
-    def setupLocalPlayer(self):
         # Create a floater object, which floats 2 units above ralph.  We
         # use this as a target for the camera to look at.
 
@@ -61,12 +66,6 @@ class DistributedPlayerOV(DistributedPlayer):
         self.accept("a-up", self.setKey, ["cam-left", False])
         self.accept("s-up", self.setKey, ["cam-right", False])
 
-        taskMgr.add(self.move, "moveTask")
-
-        # Set up the camera
-        self.disableMouse()
-        self.camera.setPos(self.ralph.getX(), self.ralph.getY() + 10, 2)
-
         self.cTrav = CollisionTraverser()
 
         # Use a CollisionHandlerPusher to handle collisions between Ralph and
@@ -88,8 +87,7 @@ class DistributedPlayerOV(DistributedPlayer):
         # Note that we need to add ralph both to the pusher and to the
         # traverser; the pusher needs to know which node to push back when a
         # collision occurs!
-        self.ralphPusher.addCollider(self.ralphColNp, self.ralph)
-        self.cTrav.addCollider(self.ralphColNp, self.ralphPusher)
+        self.ralphPusher.addCollider(self.ralphColNp, self)
 
         # We will detect the height of the terrain by creating a collision
         # ray and casting it downward toward the terrain.  One ray will
@@ -105,7 +103,6 @@ class DistributedPlayerOV(DistributedPlayer):
         self.ralphGroundCol.setIntoCollideMask(CollideMask.allOff())
         self.ralphGroundColNp = self.ralph.attachNewNode(self.ralphGroundCol)
         self.ralphGroundHandler = CollisionHandlerQueue()
-        self.cTrav.addCollider(self.ralphGroundColNp, self.ralphGroundHandler)
 
         self.camGroundRay = CollisionRay()
         self.camGroundRay.setOrigin(0, 0, 9)
@@ -114,9 +111,8 @@ class DistributedPlayerOV(DistributedPlayer):
         self.camGroundCol.addSolid(self.camGroundRay)
         self.camGroundCol.setFromCollideMask(CollideMask.bit(0))
         self.camGroundCol.setIntoCollideMask(CollideMask.allOff())
-        self.camGroundColNp = self.camera.attachNewNode(self.camGroundCol)
+        self.camGroundColNp = base.camera.attachNewNode(self.camGroundCol)
         self.camGroundHandler = CollisionHandlerQueue()
-        self.cTrav.addCollider(self.camGroundColNp, self.camGroundHandler)
 
         # Uncomment this line to see the collision rays
         # self.ralphColNp.show()
@@ -125,6 +121,51 @@ class DistributedPlayerOV(DistributedPlayer):
         # Uncomment this line to show a visual representation of the
         # collisions occuring
         # self.cTrav.showCollisions(render)
+
+    def setLocation(self, parentId, zoneId, teleport=0):
+        super().setLocation(parentId, zoneId, teleport)
+
+        # If we've been parented underneath a grid (the world), set up our local controls.
+        # Otherwise, disable them.
+        if self.gridParent:
+            self.collisionsOn()
+        else:
+            self.collisionsOff()
+
+    def collisionsOn(self):
+        if self.colliding:
+            return
+
+        self.colliding = True
+
+        # Set up the camera
+        base.disableMouse()
+        base.camera.setPos(self.getX(render), self.getY(render) + 10, 2)
+
+        self.cTrav.addCollider(self.ralphColNp, self.ralphPusher)
+        self.cTrav.addCollider(self.ralphGroundColNp, self.ralphGroundHandler)
+        self.cTrav.addCollider(self.camGroundColNp, self.camGroundHandler)
+
+        taskMgr.add(self.move, "moveTask")
+
+        # Start broadcasting our position to the server.
+        self.startPosHprBroadcast()
+
+    def collisionsOff(self):
+        if not self.colliding:
+            return
+
+        self.colliding = False
+
+        # Stop broadcasting our position.
+        self.stopPosHprBroadcast()
+
+        taskMgr.remove("moveTask")
+        base.enableMouse()
+
+        self.cTrav.removeCollider(self.ralphColNp)
+        self.cTrav.removeCollider(self.ralphGroundColNp)
+        self.cTrav.removeCollider(self.camGroundColNp)
 
     # Records the state of the arrow keys
     def setKey(self, key, value):
@@ -143,20 +184,20 @@ class DistributedPlayerOV(DistributedPlayer):
         # If the camera-right key is pressed, move camera right.
 
         if self.keyMap["cam-left"]:
-            self.camera.setX(self.camera, -20 * dt)
+            base.camera.setX(base.camera, -20 * dt)
         if self.keyMap["cam-right"]:
-            self.camera.setX(self.camera, +20 * dt)
+            base.camera.setX(base.camera, +20 * dt)
 
         # If a move-key is pressed, move ralph in the specified direction.
 
         if self.keyMap["left"]:
-            self.ralph.setH(self.ralph.getH() + 300 * dt)
+            self.setH(self.getH() + 300 * dt)
         if self.keyMap["right"]:
-            self.ralph.setH(self.ralph.getH() - 300 * dt)
+            self.setH(self.getH() - 300 * dt)
         if self.keyMap["forward"]:
-            self.ralph.setY(self.ralph, -20 * dt)
+            self.setY(self.ralph, -20 * dt)
         if self.keyMap["backward"]:
-            self.ralph.setY(self.ralph, +10 * dt)
+            self.setY(self.ralph, +10 * dt)
 
         # If ralph is moving, loop the run animation.
         # If he is standing still, stop the animation.
@@ -183,21 +224,21 @@ class DistributedPlayerOV(DistributedPlayer):
         # If the camera is too far from ralph, move it closer.
         # If the camera is too close to ralph, move it farther.
 
-        camvec = self.ralph.getPos() - self.camera.getPos()
+        camvec = self.getPos(render) - base.camera.getPos()
         camvec.setZ(0)
         camdist = camvec.length()
         camvec.normalize()
         if camdist > 10.0:
-            self.camera.setPos(self.camera.getPos() + camvec * (camdist - 10))
+            base.camera.setPos(base.camera.getPos() + camvec * (camdist - 10))
             camdist = 10.0
         if camdist < 5.0:
-            self.camera.setPos(self.camera.getPos() - camvec * (5 - camdist))
+            base.camera.setPos(base.camera.getPos() - camvec * (5 - camdist))
             camdist = 5.0
 
         # Normally, we would have to call traverse() to check for collisions.
         # However, the class ShowBase that we inherit from has a task to do
         # this for us, if we assign a CollisionTraverser to self.cTrav.
-        # self.cTrav.traverse(render)
+        self.cTrav.traverse(render)
 
         # Adjust ralph's Z coordinate.  If ralph's ray hit terrain,
         # update his Z
@@ -207,7 +248,7 @@ class DistributedPlayerOV(DistributedPlayer):
 
         for entry in entries:
             if entry.getIntoNode().name == "terrain":
-                self.ralph.setZ(entry.getSurfacePoint(render).getZ())
+                self.setZ(render, entry.getSurfacePoint(render).getZ())
 
         # Keep the camera at one unit above the terrain,
         # or two units above ralph, whichever is greater.
@@ -217,13 +258,13 @@ class DistributedPlayerOV(DistributedPlayer):
 
         for entry in entries:
             if entry.getIntoNode().name == "terrain":
-                self.camera.setZ(entry.getSurfacePoint(render).getZ() + 1.5)
-        if self.camera.getZ() < self.ralph.getZ() + 2.0:
-            self.camera.setZ(self.ralph.getZ() + 2.0)
+                base.camera.setZ(entry.getSurfacePoint(render).getZ() + 1.5)
+        if base.camera.getZ() < self.getZ(render) + 2.0:
+            base.camera.setZ(self.getZ(render) + 2.0)
 
         # The camera should look in ralph's direction,
         # but it should also try to stay horizontal, so look at
         # a floater which hovers above ralph's head.
-        self.camera.lookAt(self.floater)
+        base.camera.lookAt(self.floater)
 
         return task.cont

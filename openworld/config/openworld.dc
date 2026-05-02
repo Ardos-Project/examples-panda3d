@@ -32,7 +32,7 @@ dclass DistributedDistrict: DistributedObject {
 dclass DistributedWorld: DistributedCartesianGrid {
   // base:size:resolution
   // 3x3 interest grids, with 20x20 size, zoneIds/grids starting at 500 (positon 0.0 = 500)
-  setParentingRules(string type="Cartesian", string Rule="500:20:1") broadcast ram;
+  setParentingRules(string type="Cartesian", string Rule="500:20:1") required broadcast ram;
 }
 
 // We generate trees in each grid of the world to better visualize grid interest being opened/closed as we run around.

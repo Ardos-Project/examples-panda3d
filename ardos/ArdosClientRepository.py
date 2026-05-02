@@ -25,6 +25,9 @@ class ArdosClientRepository(ClientRepositoryBase):
     # Interests opened by the server will have a (1 << 15) mask to indentify them.
     # This needs to be stripped before being sent as an event here.
     ServerInterestHandleMask = 0x7FFF
+    # Used by some internal Panda classes (DistributedCartesianGrid notably) when a client is
+    # disconnected from a shard/logs out. Signals to stop tasks
+    StopVisibilityEvent = "ardos-stop-visibility"
 
     def __init__(self, *args, **kwargs):
         ClientRepositoryBase.__init__(self, *args, **kwargs)
@@ -62,7 +65,6 @@ class ArdosClientRepository(ClientRepositoryBase):
 
     def handleDatagram(self, di: PyDatagramIterator) -> None:
         msgType = self.getMsgType()
-        self.notify.warning(f"GOT MESSAGE: {msgType}")
         if msgType == CLIENT_HELLO_RESP:
             self.handleHelloResp()
         elif msgType == CLIENT_EJECT:

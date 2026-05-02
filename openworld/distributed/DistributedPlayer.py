@@ -18,6 +18,7 @@ class DistributedPlayer(DistributedSmoothNode):
 
         # Create the visual representation of the player.
         self.setupPlayer()
+        self.reparentTo(render)
 
         # Start smoothing/lerping the players position.
         self.activateSmoothing(True, True)
@@ -45,7 +46,7 @@ class DistributedPlayer(DistributedSmoothNode):
         self.ralph = Actor(
             "models/ralph", {"run": "models/ralph-run", "walk": "models/ralph-walk"}
         )
-        self.ralph.reparentTo(render)
+        self.ralph.reparentTo(self)
         self.ralph.setScale(0.2)
 
         # Setup their nametag.

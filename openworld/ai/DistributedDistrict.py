@@ -6,4 +6,4 @@ class DistributedDistrict(DistributedObject):
     def announceGenerate(self):
         DistributedObject.announceGenerate(self)
 
-        print("DistributedDistrict generated!")
+        self.sendUpdate("requestJoin", [])

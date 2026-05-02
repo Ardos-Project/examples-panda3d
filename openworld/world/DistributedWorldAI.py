@@ -1,5 +1,6 @@
 import random
 
+from direct.directnotify import DirectNotifyGlobal
 from direct.distributed.DistributedCartesianGridAI import DistributedCartesianGridAI
 from direct.distributed.DistributedSmoothNodeAI import DistributedSmoothNodeAI
 
@@ -12,6 +13,8 @@ class DistributedWorldAI(DistributedCartesianGridAI):
     The combination of `setParentingRules` in the dc definition for this class and the values
     below drive the behavior of surrounding grids being visible, while only having location under one grid.
     """
+
+    notify = DirectNotifyGlobal.directNotify.newCategory("DistributedWorldAI")
 
     # You can play around with these values to see how the generated
     # grid grows/shrinks, and how many surrounding objects you can see.
@@ -34,7 +37,7 @@ class DistributedWorldAI(DistributedCartesianGridAI):
     WORLD_GRID_RADIUS = 1
     # The width of the cells in game units.
     # This is used along with an avatar/objects position to calculate which grid they're standing in.
-    WORLD_CELL_WIDTH = 75
+    WORLD_CELL_WIDTH = 15
 
     # `setParentingRules` with these values would look like:
     # setParentingRules(string type="Cartesian", string Rule="500:20:1") broadcast ram;
@@ -60,7 +63,7 @@ class DistributedWorldAI(DistributedCartesianGridAI):
         if isinstance(childObj, DistributedPlayerAI):
             # Make it a little random.
             childObj.setPos(
-                self.startPos + (random.randint(-10, 10), random.randint(-10, 10), 0)
+                self.startPos + (random.randint(-10, 10), random.randint(-10, 10), 0.5)
             )
 
         # If a child distributed object arrives underneath us,
