@@ -77,3 +77,6 @@ class OpenWorldClientRepository(ArdosClientRepository, FSM):
 
     def exitLogin(self):
         self.statusText.destroy()
+
+    def enterPlaying(self):
+        pass

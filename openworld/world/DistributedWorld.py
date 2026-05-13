@@ -48,6 +48,8 @@ class DistributedWorld(DistributedCartesianGrid):
         render.setLight(render.attachNewNode(self.ambientLight))
         render.setLight(render.attachNewNode(self.directionalLight))
 
+        self.cr.demand("Playing")
+
     def delete(self):
         """
         Make sure we clean up after ourselves if the world goes away.
@@ -55,8 +57,5 @@ class DistributedWorld(DistributedCartesianGrid):
         """
         # Remove the world model.
         self.environ.removeNode()
-        # Remove lighting.
-        self.ambientLight.removeNode()
-        self.directionalLight.removeNode()
 
         DistributedCartesianGrid.delete(self)

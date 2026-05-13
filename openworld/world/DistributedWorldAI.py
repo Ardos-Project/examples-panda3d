@@ -5,6 +5,7 @@ from direct.distributed.DistributedCartesianGridAI import DistributedCartesianGr
 from direct.distributed.DistributedSmoothNodeAI import DistributedSmoothNodeAI
 
 from openworld.distributed.DistributedPlayerAI import DistributedPlayerAI
+from openworld.world.DistributedTreeAI import DistributedTreeAI
 
 
 class DistributedWorldAI(DistributedCartesianGridAI):
@@ -58,12 +59,37 @@ class DistributedWorldAI(DistributedCartesianGridAI):
         self.environ = loader.loadModel("../models/world")
         self.startPos = self.environ.find("**/start_point").getPos()
 
+    def announceGenerate(self):
+        DistributedCartesianGridAI.announceGenerate(self)
+
+        self.generateTrees()
+
+    def generateTrees(self):
+        halfGrid = self.gridSize // 2
+        halfArea = self.WORLD_GRID_SIZE // 2
+        for row in range(halfGrid - halfArea, halfGrid + halfArea):
+            for col in range(halfGrid - halfArea, halfGrid + halfArea):
+                zoneId = self.startingZone + (row * self.gridSize) + col
+                x, y, z = self.getZoneCellOriginCenter(zoneId)
+                tree = DistributedTreeAI(self.air)
+                tree.setPos(x, y, z + 5)
+                tree.generateOtpObject(self.doId, zoneId)
+                tree.d_setPos(x, y, z + 5)
+
     def handleChildArrive(self, childObj, zoneId):
         # If it's a player, give them an initial spawn position.
         if isinstance(childObj, DistributedPlayerAI):
-            # Make it a little random.
-            childObj.setPos(
-                self.startPos + (random.randint(-10, 10), random.randint(-10, 10), 0.5)
+            # Make it a little random. Z is left at the spawn point's height;
+            # the OV's terrain ray will snap the player onto the surface on
+            # the very first move() tick.
+            childObj.b_setPosHpr(
+                *(
+                    self.startPos
+                    + (random.randint(-10, 10), random.randint(-10, 10), 0)
+                ),
+                0,
+                0,
+                0,
             )
 
         # If a child distributed object arrives underneath us,

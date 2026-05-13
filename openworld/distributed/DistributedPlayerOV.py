@@ -1,3 +1,4 @@
+import math
 import sys
 
 from direct.directnotify import DirectNotifyGlobal
@@ -12,6 +13,7 @@ from panda3d.core import (
     CollisionHandlerPusher,
     CollisionRay,
     CollisionHandlerQueue,
+    WindowProperties,
 )
 
 from openworld.distributed.DistributedPlayer import DistributedPlayer
@@ -19,6 +21,18 @@ from openworld.distributed.DistributedPlayer import DistributedPlayer
 
 class DistributedPlayerOV(DistributedPlayer):
     notify = DirectNotifyGlobal.directNotify.newCategory("DistributedPlayerOV")
+
+    # Camera tuning.
+    CAM_DIST_MIN = 4.0
+    CAM_DIST_MAX = 25.0
+    CAM_DIST_DEFAULT = 10.0
+    CAM_ZOOM_STEP = 1.5
+    CAM_PITCH_MIN = 2.0
+    CAM_PITCH_MAX = 80.0
+    CAM_PITCH_DEFAULT = 12.0
+    CAM_SENSITIVITY_X = 0.25  # degrees of yaw per pixel of mouse delta
+    CAM_SENSITIVITY_Y = 0.20  # degrees of pitch per pixel of mouse delta
+    CAM_SNAP_RATE = 6.0  # exponential rate (per second) for snapping yaw back
 
     def __init__(self, cr):
         DistributedPlayer.__init__(self, cr)
@@ -29,9 +43,15 @@ class DistributedPlayerOV(DistributedPlayer):
             "right": 0,
             "forward": 0,
             "backward": 0,
-            "cam-left": 0,
-            "cam-right": 0,
         }
+
+        # Orbit camera state. camYaw is world-space (degrees, CCW around Z from +Y),
+        # so "directly behind ralph" corresponds to camYaw == ralph.getH().
+        self.camYaw = 0.0
+        self.camPitch = self.CAM_PITCH_DEFAULT
+        self.camDistance = self.CAM_DIST_DEFAULT
+        self.rightDragging = False
+        self.lastMousePos = None
 
         self.colliding = False
 
@@ -57,14 +77,24 @@ class DistributedPlayerOV(DistributedPlayer):
         self.accept("arrow_right", self.setKey, ["right", True])
         self.accept("arrow_up", self.setKey, ["forward", True])
         self.accept("arrow_down", self.setKey, ["backward", True])
-        self.accept("a", self.setKey, ["cam-left", True])
-        self.accept("s", self.setKey, ["cam-right", True])
         self.accept("arrow_left-up", self.setKey, ["left", False])
         self.accept("arrow_right-up", self.setKey, ["right", False])
         self.accept("arrow_up-up", self.setKey, ["forward", False])
         self.accept("arrow_down-up", self.setKey, ["backward", False])
-        self.accept("a-up", self.setKey, ["cam-left", False])
-        self.accept("s-up", self.setKey, ["cam-right", False])
+        self.accept("a", self.setKey, ["left", True])
+        self.accept("d", self.setKey, ["right", True])
+        self.accept("w", self.setKey, ["forward", True])
+        self.accept("s", self.setKey, ["backward", True])
+        self.accept("a-up", self.setKey, ["left", False])
+        self.accept("d-up", self.setKey, ["right", False])
+        self.accept("w-up", self.setKey, ["forward", False])
+        self.accept("s-up", self.setKey, ["backward", False])
+
+        # Orbit camera: hold right-click to drag-rotate, mouse wheel to zoom.
+        self.accept("mouse3", self.startCamDrag)
+        self.accept("mouse3-up", self.stopCamDrag)
+        self.accept("wheel_up", self.zoomCam, [-1])
+        self.accept("wheel_down", self.zoomCam, [1])
 
         self.cTrav = CollisionTraverser()
 
@@ -95,7 +125,11 @@ class DistributedPlayerOV(DistributedPlayer):
         # A ray may hit the terrain, or it may hit a rock or a tree.  If it
         # hits the terrain, we can detect the height.
         self.ralphGroundRay = CollisionRay()
-        self.ralphGroundRay.setOrigin(0, 0, 9)
+        # Start the ray high above any terrain peak in the world so the
+        # downward cast always reaches the surface, even right after spawn.
+        # A ray that starts under the terrain finds no hit and the player
+        # remains clipped below the mesh until they walk to lower ground.
+        self.ralphGroundRay.setOrigin(0, 0, 1000)
         self.ralphGroundRay.setDirection(0, 0, -1)
         self.ralphGroundCol = CollisionNode("ralphRay")
         self.ralphGroundCol.addSolid(self.ralphGroundRay)
@@ -105,7 +139,7 @@ class DistributedPlayerOV(DistributedPlayer):
         self.ralphGroundHandler = CollisionHandlerQueue()
 
         self.camGroundRay = CollisionRay()
-        self.camGroundRay.setOrigin(0, 0, 9)
+        self.camGroundRay.setOrigin(0, 0, 1000)
         self.camGroundRay.setDirection(0, 0, -1)
         self.camGroundCol = CollisionNode("camRay")
         self.camGroundCol.addSolid(self.camGroundRay)
@@ -140,7 +174,13 @@ class DistributedPlayerOV(DistributedPlayer):
 
         # Set up the camera
         base.disableMouse()
-        base.camera.setPos(self.getX(render), self.getY(render) + 10, 2)
+        # Start the camera directly behind ralph at the default pitch/distance.
+        self.camYaw = self.getH(render)
+        self.camPitch = self.CAM_PITCH_DEFAULT
+        self.camDistance = self.CAM_DIST_DEFAULT
+        self.rightDragging = False
+        self.lastMousePos = None
+        self._placeCamera()
 
         self.cTrav.addCollider(self.ralphColNp, self.ralphPusher)
         self.cTrav.addCollider(self.ralphGroundColNp, self.ralphGroundHandler)
@@ -163,6 +203,11 @@ class DistributedPlayerOV(DistributedPlayer):
         taskMgr.remove("moveTask")
         base.enableMouse()
 
+        # Make sure the cursor is restored if we were mid-drag.
+        self.rightDragging = False
+        self.lastMousePos = None
+        self._setCursorHidden(False)
+
         self.cTrav.removeCollider(self.ralphColNp)
         self.cTrav.removeCollider(self.ralphGroundColNp)
         self.cTrav.removeCollider(self.camGroundColNp)
@@ -170,6 +215,63 @@ class DistributedPlayerOV(DistributedPlayer):
     # Records the state of the arrow keys
     def setKey(self, key, value):
         self.keyMap[key] = value
+
+    def startCamDrag(self):
+        self.rightDragging = True
+        # Anchor the cursor to the center while dragging so we get unbounded deltas.
+        cx, cy = self._winCenter()
+        if base.win is not None:
+            base.win.movePointer(0, cx, cy)
+        self.lastMousePos = (cx, cy)
+        self._setCursorHidden(True)
+
+    def stopCamDrag(self):
+        self.rightDragging = False
+        self.lastMousePos = None
+        self._setCursorHidden(False)
+
+    def _winCenter(self):
+        if base.win is None:
+            return (0, 0)
+        return (base.win.getXSize() // 2, base.win.getYSize() // 2)
+
+    def _setCursorHidden(self, hidden):
+        if base.win is None:
+            return
+        props = WindowProperties()
+        props.setCursorHidden(hidden)
+        base.win.requestProperties(props)
+
+    def zoomCam(self, direction):
+        self.camDistance = max(
+            self.CAM_DIST_MIN,
+            min(self.CAM_DIST_MAX, self.camDistance + direction * self.CAM_ZOOM_STEP),
+        )
+
+    def _isMoving(self):
+        return bool(
+            self.keyMap["forward"]
+            or self.keyMap["backward"]
+            or self.keyMap["left"]
+            or self.keyMap["right"]
+        )
+
+    def _placeCamera(self):
+        # Compute camera position from spherical coords around ralph.
+        # camYaw=0 puts the camera at +Y from ralph; ralph faces -Y at H=0,
+        # so "behind ralph" world yaw == ralph.getH(render).
+        yawRad = math.radians(self.camYaw)
+        pitchRad = math.radians(self.camPitch)
+        cosP = math.cos(pitchRad)
+        offX = -math.sin(yawRad) * self.camDistance * cosP
+        offY = math.cos(yawRad) * self.camDistance * cosP
+        offZ = math.sin(pitchRad) * self.camDistance
+        ralphPos = self.getPos(render)
+        base.camera.setPos(
+            ralphPos[0] + offX,
+            ralphPos[1] + offY,
+            ralphPos[2] + 2.0 + offZ,
+        )
 
     # Accepts arrow keys to move either the player or the menu cursor,
     # Also deals with grid checking and collision detection
@@ -179,14 +281,6 @@ class DistributedPlayerOV(DistributedPlayer):
         # the desired speed in order to find out with which distance to move
         # in order to achieve that desired speed.
         dt = base.clock.dt
-
-        # If the camera-left key is pressed, move camera left.
-        # If the camera-right key is pressed, move camera right.
-
-        if self.keyMap["cam-left"]:
-            base.camera.setX(base.camera, -20 * dt)
-        if self.keyMap["cam-right"]:
-            base.camera.setX(base.camera, +20 * dt)
 
         # If a move-key is pressed, move ralph in the specified direction.
 
@@ -221,19 +315,34 @@ class DistributedPlayerOV(DistributedPlayer):
                 self.ralph.pose("walk", 5)
                 self.isMoving = False
 
-        # If the camera is too far from ralph, move it closer.
-        # If the camera is too close to ralph, move it farther.
+        # Update the orbit camera angles. Right-click drag rotates freely;
+        # otherwise, if the player is moving, smoothly snap yaw back behind ralph.
+        if self.rightDragging and base.win is not None and base.win.hasPointer(0):
+            p = base.win.getPointer(0)
+            mx, my = p.getX(), p.getY()
+            cx, cy = self._winCenter()
+            # Deltas are measured from the window center, then we snap the
+            # pointer back so it can never drift off the window edge.
+            dx = mx - cx
+            dy = my - cy
+            if dx or dy:
+                self.camYaw -= dx * self.CAM_SENSITIVITY_X
+                self.camPitch = max(
+                    self.CAM_PITCH_MIN,
+                    min(
+                        self.CAM_PITCH_MAX, self.camPitch + dy * self.CAM_SENSITIVITY_Y
+                    ),
+                )
+                base.win.movePointer(0, cx, cy)
+            self.lastMousePos = (cx, cy)
+        elif self._isMoving():
+            targetYaw = self.getH(render)
+            # Wrap the difference into [-180, 180] so we lerp the short way around.
+            diff = ((targetYaw - self.camYaw + 180.0) % 360.0) - 180.0
+            factor = 1.0 - math.exp(-self.CAM_SNAP_RATE * dt)
+            self.camYaw += diff * factor
 
-        camvec = self.getPos(render) - base.camera.getPos()
-        camvec.setZ(0)
-        camdist = camvec.length()
-        camvec.normalize()
-        if camdist > 10.0:
-            base.camera.setPos(base.camera.getPos() + camvec * (camdist - 10))
-            camdist = 10.0
-        if camdist < 5.0:
-            base.camera.setPos(base.camera.getPos() - camvec * (5 - camdist))
-            camdist = 5.0
+        self._placeCamera()
 
         # Normally, we would have to call traverse() to check for collisions.
         # However, the class ShowBase that we inherit from has a task to do
@@ -250,15 +359,18 @@ class DistributedPlayerOV(DistributedPlayer):
             if entry.getIntoNode().name == "terrain":
                 self.setZ(render, entry.getSurfacePoint(render).getZ())
 
-        # Keep the camera at one unit above the terrain,
-        # or two units above ralph, whichever is greater.
+        # Lift the camera if it would clip into the terrain. Unlike the original
+        # implementation we only lift, never snap downwards, so a high-pitched
+        # orbit view can stay elevated.
 
         entries = list(self.camGroundHandler.entries)
         entries.sort(key=lambda x: x.getSurfacePoint(render).getZ())
 
         for entry in entries:
             if entry.getIntoNode().name == "terrain":
-                base.camera.setZ(entry.getSurfacePoint(render).getZ() + 1.5)
+                minZ = entry.getSurfacePoint(render).getZ() + 1.5
+                if base.camera.getZ() < minZ:
+                    base.camera.setZ(minZ)
         if base.camera.getZ() < self.getZ(render) + 2.0:
             base.camera.setZ(self.getZ(render) + 2.0)
 
